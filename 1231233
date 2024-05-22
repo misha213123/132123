@@ -1,0 +1,77 @@
+async def list_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"[list_products] function called, chat_id: {update.effective_chat.id}")
+    db_path = get_db_path()
+
+    if not await check_table_exists(db_path):
+        logger.error("Table 'products' does not exist. Unable to fetch products.")
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="Произошла ошибка: таблица 'products' не существует. Не удается загрузить список товаров.")
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="Выберите следующее действие:", reply_markup=ReplyKeyboardMarkup([["Добавить товар"], ["Список товаров"], ["Помощь"]], resize_keyboard=True))
+        return ConversationHandler.WAITING
+
+    try:
+        with sqlite3.connect(db_path) as conn:
+            c = conn.cursor()
+            logger.info("Executing SELECT query to fetch products")
+            c.execute("SELECT product_name FROM products")
+            products = [row[0] for row in c.fetchall()]
+            logger.info(f"Fetched {len(products)} products")
+            if not products:
+                logger.info("Product list is empty")
+                await context.bot.send_message(chat_id=update.effective_chat.id, text="Список товаров пуст.")
+            else:
+                product_list = "\n".join(products)
+                logger.info(f"Sending product list to user: {product_list}")
+                await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Список товаров:\n{product_list}")
+            await context.bot.send_message(chat_id=update.effective_chat.id, text="Выберите следующее действие:", reply_markup=ReplyKeyboardMarkup([["Добавить товар"], ["Список товаров"], ["Помощь"]], resize_keyboard=True))
+            return ConversationHandler.WAITING
+    except sqlite3.Error as e:
+        logger.error(f"Error occurred: {e}")
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Произошла ошибка: {e}")
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="Выберите следующее действие:", reply_markup=ReplyKeyboardMarkup([["Добавить товар"], ["Список товаров"], ["Помощь"]], resize_keyboard=True))
+        return ConversationHandler.WAITING
+
+async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"[help] function called, chat_id: {update.effective_chat.id}")
+    help_text = "Доступные команды:\n\n" \
+                "/start - начать диалог\n" \
+                "Добавить товар - добавить новый товар\n" \
+                "Список товаров - отобразить список всех товаров\n" \
+                "Помощь - показать справку"
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=help_text)
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="Выберите следующее действие:", reply_markup=ReplyKeyboardMarkup([["Добавить товар"], ["Список товаров"], ["Помощь"]], resize_keyboard=True))
+
+    return ConversationHandler.WAITING
+
+async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"[handle_button_click] function called, chat_id: {update.effective_chat.id}")
+    button_text = update.effective_message.text
+    logger.info(f"Received button click: {button_text}")
+
+    if button_text == "Помощь":
+        logger.info("Calling help() function")
+        await help(update, context)
+    elif button_text == "Добавить товар":
+        logger.info("Calling add_product() function")
+        await add_product(update, context)
+    elif button_text == "Список товаров":
+        logger.info("Calling list_products() function")
+        await list_products(update, context)
+
+if __name__ == '__main__':
+    application = ApplicationBuilder().token("your_bot_token").build()
+
+ADDING_PRODUCT = 1
+
+conv_handler = ConversationHandler(
+    entry_points=[CommandHandler('start', start)],
+    states={
+        ADDING_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_product)],
+    },
+    fallbacks=[],
+    per_user=True,
+)
+
+application.add_handler(conv_handler)
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_button_click))
+
+application.run_polling()
